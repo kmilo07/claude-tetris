@@ -38,7 +38,7 @@
             <li><kbd>↑</kbd> rotar</li>
             <li><kbd>↓</kbd> bajar</li>
             <li><kbd>Space</kbd> caída</li>
-            <li><kbd>P</kbd> pausa</li>
+            <li><kbd>P</kbd>/<kbd>Esc</kbd> pausa</li>
           </ul>
         </div>
       </aside>
@@ -48,6 +48,31 @@
           <p id="overlay-title">GAME OVER</p>
           <p id="overlay-score"></p>
           <button id="restart-btn">Reiniciar</button>
+        </div>
+      </div>
+
+      <div id="pause-menu" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Menú de pausa">
+        <div class="overlay-box pause-box">
+          <p class="pause-title">PAUSA</p>
+          <button id="resume-btn" class="menu-btn">Reanudar</button>
+          <button id="pause-restart-btn" class="menu-btn">Reiniciar</button>
+          <button id="controls-btn" class="menu-btn" aria-expanded="false" aria-controls="pause-controls">Ver controles</button>
+          <ul id="pause-controls" class="hidden">
+            <li><kbd>←</kbd><kbd>→</kbd> mover</li>
+            <li><kbd>↑</kbd> / <kbd>X</kbd> rotar</li>
+            <li><kbd>↓</kbd> bajar</li>
+            <li><kbd>Space</kbd> caída</li>
+            <li><kbd>P</kbd> / <kbd>Esc</kbd> pausa</li>
+          </ul>
+          <div id="level-picker" class="menu-btn level-picker" tabindex="0" role="spinbutton" aria-label="Nivel inicial" aria-valuemin="1" aria-valuemax="15">
+            <span title="Se aplica al reiniciar">Nivel inicial</span>
+            <span class="level-ctl">
+              <button type="button" id="level-dec" tabindex="-1" aria-label="Bajar nivel">&minus;</button>
+              <b id="start-level-value">1</b>
+              <button type="button" id="level-inc" tabindex="-1" aria-label="Subir nivel">+</button>
+            </span>
+          </div>
+          <p class="menu-hint">El nivel inicial se aplica al pulsar Reiniciar</p>
         </div>
       </div>
     </div>
