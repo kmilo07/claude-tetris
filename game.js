@@ -115,6 +115,7 @@ function clearLines() {
     dropInterval = dropForLevel(level);
     updateHUD();
   }
+  return cleared;
 }
 
 function ghostY() {
@@ -142,7 +143,7 @@ function softDrop() {
 
 function lockPiece() {
   merge();
-  clearLines();
+  recordsTrackCombo(clearLines());
   spawn();
 }
 
@@ -224,11 +225,13 @@ function drawNext() {
 }
 
 function endGame() {
+  if (gameOver) return;
   gameOver = true;
   cancelAnimationFrame(animId);
   overlayTitle.textContent = 'GAME OVER';
   overlayScore.textContent = `Puntuación: ${score.toLocaleString()}`;
   overlay.classList.remove('hidden');
+  recordsShowGameOver();
 }
 
 function togglePause() {
@@ -249,7 +252,7 @@ function loop(ts) {
     }
   }
   draw();
-  animId = requestAnimationFrame(loop);
+  if (!gameOver) animId = requestAnimationFrame(loop);
 }
 
 function init() {
@@ -268,11 +271,14 @@ function init() {
   spawn();
   updateHUD();
   overlay.classList.add('hidden');
+  recordsOnInit();
   cancelAnimationFrame(animId);
   animId = requestAnimationFrame(loop);
 }
 
 document.addEventListener('keydown', e => {
+  if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  if (!recordsStarted) return;
   if (handlePauseKeys(e)) return;
   if (paused || gameOver) return;
   if (heldBlocked.has(e.code)) return;
@@ -299,6 +305,143 @@ document.addEventListener('keydown', e => {
 });
 
 restartBtn.addEventListener('click', init);
+
+// ===================== Records (localStorage) =====================
+const RECORDS_KEY = 'tetris.records';
+const RECORDS_TOP = 5;
+const NAME_MAX = 12;
+const recordsBox = document.getElementById('records');
+const recordsForm = document.getElementById('record-form');
+const recordNameInput = document.getElementById('record-name');
+const recordsTable = document.getElementById('records-table');
+const recordsStats = document.getElementById('records-stats');
+const resetBtn = document.getElementById('reset-records-btn');
+
+let recordsStarted = false;
+let combo = 0;
+let bestComboRun = 0;
+let highlightDate = null;
+let entrySaved = false;
+let resetArmed = false;
+
+function loadRecords() {
+  const empty = { top: [], bestCombo: 0, maxLines: 0 };
+  try {
+    const d = JSON.parse(localStorage.getItem(RECORDS_KEY));
+    if (!d || !Array.isArray(d.top)) return empty;
+    return {
+      top: d.top.filter(e => e && typeof e.score === 'number').sort((a, b) => b.score - a.score).slice(0, RECORDS_TOP),
+      bestCombo: Number(d.bestCombo) || 0,
+      maxLines: Number(d.maxLines) || 0,
+    };
+  } catch (e) { return empty; }
+}
+
+function saveRecords(rec) {
+  try { localStorage.setItem(RECORDS_KEY, JSON.stringify(rec)); } catch (e) { /* ignore */ }
+}
+
+function recordsTrackCombo(cleared) {
+  if (cleared > 0) { combo++; bestComboRun = Math.max(bestComboRun, combo); }
+  else combo = 0;
+}
+
+function recordsOnInit() {
+  recordsStarted = true;
+  combo = 0;
+  bestComboRun = 0;
+  highlightDate = null;
+  entrySaved = false;
+  resetArmed = false;
+  recordsBox.classList.add('hidden');
+  overlayTitle.classList.remove('title-start');
+  restartBtn.textContent = 'Reiniciar';
+}
+
+function qualifies(rec) {
+  return score > 0 && (rec.top.length < RECORDS_TOP || score > rec.top[rec.top.length - 1].score);
+}
+
+function renderRecords() {
+  const rec = loadRecords();
+  recordsTable.textContent = '';
+  if (!rec.top.length) {
+    const p = document.createElement('p');
+    p.className = 'records-empty';
+    p.textContent = 'Sin records todavía';
+    recordsTable.appendChild(p);
+  } else {
+    rec.top.forEach((e, i) => {
+      const row = document.createElement('div');
+      row.className = 'record-row' + (highlightDate !== null && e.date === highlightDate ? ' record-current' : '');
+      [`${i + 1}.`, String(e.name || '---'), Number(e.score).toLocaleString()].forEach((t, j) => {
+        const s = document.createElement('span');
+        s.className = ['rk-pos', 'rk-name', 'rk-score'][j];
+        s.textContent = t;
+        row.appendChild(s);
+      });
+      recordsTable.appendChild(row);
+    });
+  }
+  recordsStats.textContent = `Mejor combo: ${rec.bestCombo} · Líneas máx: ${rec.maxLines}`;
+  resetBtn.textContent = resetArmed ? '¿Seguro? Pulsa otra vez' : 'Resetear records';
+  resetBtn.classList.toggle('armed', resetArmed);
+  return rec;
+}
+
+function recordsShowStart() {
+  recordsStarted = false;
+  cancelAnimationFrame(animId);
+  overlayTitle.textContent = 'CLAUDE TETRIS';
+  overlayTitle.classList.add('title-start');
+  overlayScore.textContent = '';
+  restartBtn.textContent = 'Jugar';
+  recordsForm.classList.add('hidden');
+  renderRecords();
+  recordsBox.classList.remove('hidden');
+  overlay.classList.remove('hidden');
+}
+
+function recordsShowGameOver() {
+  const rec = loadRecords();
+  rec.bestCombo = Math.max(rec.bestCombo, bestComboRun);
+  rec.maxLines = Math.max(rec.maxLines, lines);
+  saveRecords(rec);
+  entrySaved = false;
+  highlightDate = null;
+  resetArmed = false;
+  recordNameInput.value = '';
+  recordsForm.classList.toggle('hidden', !qualifies(rec));
+  renderRecords();
+  recordsBox.classList.remove('hidden');
+  if (!recordsForm.classList.contains('hidden')) recordNameInput.focus();
+}
+
+recordsForm.addEventListener('submit', e => {
+  e.preventDefault();
+  if (entrySaved || !gameOver) return;
+  const rec = loadRecords();
+  if (!qualifies(rec)) { recordsForm.classList.add('hidden'); return; }
+  entrySaved = true;
+  highlightDate = Date.now();
+  const name = recordNameInput.value.trim().slice(0, NAME_MAX) || 'ANON';
+  rec.top.push({ name, score, lines, level, date: highlightDate });
+  rec.top.sort((a, b) => b.score - a.score);
+  rec.top = rec.top.slice(0, RECORDS_TOP);
+  saveRecords(rec);
+  recordsForm.classList.add('hidden');
+  renderRecords();
+  restartBtn.focus();
+});
+
+resetBtn.addEventListener('click', () => {
+  if (!resetArmed) { resetArmed = true; renderRecords(); return; }
+  resetArmed = false;
+  highlightDate = null;
+  try { localStorage.removeItem(RECORDS_KEY); } catch (e) { /* ignore */ }
+  if (gameOver) recordsForm.classList.toggle('hidden', !qualifies(loadRecords()) || entrySaved);
+  renderRecords();
+});
 
 // ==== Menu de pausa ====
 const MAX_START_LEVEL = 15;
@@ -383,4 +526,6 @@ controlsBtn.addEventListener('click', () => {
 document.getElementById('level-dec').addEventListener('click', () => setStartLevel(startLevel - 1));
 document.getElementById('level-inc').addEventListener('click', () => setStartLevel(startLevel + 1));
 
+// Boot (must stay last: records and pause blocks above declare consts used by init)
 init();
+recordsShowStart();
