@@ -26,6 +26,10 @@ const PIECES = [
   [[0,0,7],[7,7,7],[0,0,0]],                  // L
 ];
 
+function dropForLevel(lv) {
+  return Math.max(100, 1000 - (lv - 1) * 90);
+}
+
 const LINE_SCORES = [0, 100, 300, 500, 800];
 
 const canvas = document.getElementById('board');
@@ -40,6 +44,7 @@ const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 
+let startLevel = 1;
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
 
 function createBoard() {
@@ -106,10 +111,11 @@ function clearLines() {
   if (cleared) {
     lines += cleared;
     score += (LINE_SCORES[cleared] || 0) * level;
-    level = Math.floor(lines / 10) + 1;
-    dropInterval = Math.max(100, 1000 - (level - 1) * 90);
+    level = Math.max(startLevel, Math.floor(lines / 10) + 1);
+    dropInterval = dropForLevel(level);
     updateHUD();
   }
+  return cleared;
 }
 
 function ghostY() {
@@ -137,7 +143,7 @@ function softDrop() {
 
 function lockPiece() {
   merge();
-  clearLines();
+  recordsTrackCombo(clearLines());
   spawn();
 }
 
@@ -323,25 +329,18 @@ function drawNext() {
 }
 
 function endGame() {
+  if (gameOver) return;
   gameOver = true;
   cancelAnimationFrame(animId);
   overlayTitle.textContent = 'GAME OVER';
   overlayScore.textContent = `Puntuación: ${score.toLocaleString()}`;
   overlay.classList.remove('hidden');
+  recordsShowGameOver();
 }
 
 function togglePause() {
   if (gameOver) return;
-  paused = !paused;
-  if (!paused) {
-    lastTime = performance.now();
-    loop(lastTime);
-  } else {
-    cancelAnimationFrame(animId);
-    overlayTitle.textContent = 'PAUSA';
-    overlayScore.textContent = '';
-    overlay.classList.remove('hidden');
-  }
+  if (paused) closePauseMenu(); else openPauseMenu();
 }
 
 function loop(ts) {
@@ -357,31 +356,36 @@ function loop(ts) {
     }
   }
   draw();
-  animId = requestAnimationFrame(loop);
+  if (!gameOver) animId = requestAnimationFrame(loop);
 }
 
 function init() {
   board = createBoard();
   score = 0;
   lines = 0;
-  level = 1;
+  level = startLevel;
   paused = false;
   gameOver = false;
-  dropInterval = 1000;
+  dropInterval = dropForLevel(level);
+  pauseMenu.classList.add('hidden');
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   dropAccum = 0;
   lastTime = performance.now();
   next = randomPiece();
   spawn();
   updateHUD();
   overlay.classList.add('hidden');
+  recordsOnInit();
   cancelAnimationFrame(animId);
   animId = requestAnimationFrame(loop);
 }
 
 document.addEventListener('keydown', e => {
-  if (e.target && e.target.id === 'skin-select') return;
-  if (e.code === 'KeyP') { togglePause(); return; }
+  if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  if (!recordsStarted) return;
+  if (handlePauseKeys(e)) return;
   if (paused || gameOver) return;
+  if (heldBlocked.has(e.code)) return;
   switch (e.code) {
     case 'ArrowLeft':
       if (!collide(current.shape, current.x - 1, current.y)) current.x--;
@@ -406,5 +410,227 @@ document.addEventListener('keydown', e => {
 
 restartBtn.addEventListener('click', init);
 
+// ===================== Records (localStorage) =====================
+const RECORDS_KEY = 'tetris.records';
+const RECORDS_TOP = 5;
+const NAME_MAX = 12;
+const recordsBox = document.getElementById('records');
+const recordsForm = document.getElementById('record-form');
+const recordNameInput = document.getElementById('record-name');
+const recordsTable = document.getElementById('records-table');
+const recordsStats = document.getElementById('records-stats');
+const resetBtn = document.getElementById('reset-records-btn');
+
+let recordsStarted = false;
+let combo = 0;
+let bestComboRun = 0;
+let highlightDate = null;
+let entrySaved = false;
+let resetArmed = false;
+
+function loadRecords() {
+  const empty = { top: [], bestCombo: 0, maxLines: 0 };
+  try {
+    const d = JSON.parse(localStorage.getItem(RECORDS_KEY));
+    if (!d || !Array.isArray(d.top)) return empty;
+    return {
+      top: d.top.filter(e => e && typeof e.score === 'number').sort((a, b) => b.score - a.score).slice(0, RECORDS_TOP),
+      bestCombo: Number(d.bestCombo) || 0,
+      maxLines: Number(d.maxLines) || 0,
+    };
+  } catch (e) { return empty; }
+}
+
+function saveRecords(rec) {
+  try { localStorage.setItem(RECORDS_KEY, JSON.stringify(rec)); } catch (e) { /* ignore */ }
+}
+
+function recordsTrackCombo(cleared) {
+  if (cleared > 0) { combo++; bestComboRun = Math.max(bestComboRun, combo); }
+  else combo = 0;
+}
+
+function recordsOnInit() {
+  recordsStarted = true;
+  combo = 0;
+  bestComboRun = 0;
+  highlightDate = null;
+  entrySaved = false;
+  resetArmed = false;
+  recordsBox.classList.add('hidden');
+  overlayTitle.classList.remove('title-start');
+  restartBtn.textContent = 'Reiniciar';
+}
+
+function qualifies(rec) {
+  return score > 0 && (rec.top.length < RECORDS_TOP || score > rec.top[rec.top.length - 1].score);
+}
+
+function renderRecords() {
+  const rec = loadRecords();
+  recordsTable.textContent = '';
+  if (!rec.top.length) {
+    const p = document.createElement('p');
+    p.className = 'records-empty';
+    p.textContent = 'Sin records todavía';
+    recordsTable.appendChild(p);
+  } else {
+    rec.top.forEach((e, i) => {
+      const row = document.createElement('div');
+      row.className = 'record-row' + (highlightDate !== null && e.date === highlightDate ? ' record-current' : '');
+      [`${i + 1}.`, String(e.name || '---'), Number(e.score).toLocaleString()].forEach((t, j) => {
+        const s = document.createElement('span');
+        s.className = ['rk-pos', 'rk-name', 'rk-score'][j];
+        s.textContent = t;
+        row.appendChild(s);
+      });
+      recordsTable.appendChild(row);
+    });
+  }
+  recordsStats.textContent = `Mejor combo: ${rec.bestCombo} · Líneas máx: ${rec.maxLines}`;
+  resetBtn.textContent = resetArmed ? '¿Seguro? Pulsa otra vez' : 'Resetear records';
+  resetBtn.classList.toggle('armed', resetArmed);
+  return rec;
+}
+
+function recordsShowStart() {
+  recordsStarted = false;
+  cancelAnimationFrame(animId);
+  overlayTitle.textContent = 'CLAUDE TETRIS';
+  overlayTitle.classList.add('title-start');
+  overlayScore.textContent = '';
+  restartBtn.textContent = 'Jugar';
+  recordsForm.classList.add('hidden');
+  renderRecords();
+  recordsBox.classList.remove('hidden');
+  overlay.classList.remove('hidden');
+}
+
+function recordsShowGameOver() {
+  const rec = loadRecords();
+  rec.bestCombo = Math.max(rec.bestCombo, bestComboRun);
+  rec.maxLines = Math.max(rec.maxLines, lines);
+  saveRecords(rec);
+  entrySaved = false;
+  highlightDate = null;
+  resetArmed = false;
+  recordNameInput.value = '';
+  recordsForm.classList.toggle('hidden', !qualifies(rec));
+  renderRecords();
+  recordsBox.classList.remove('hidden');
+  if (!recordsForm.classList.contains('hidden')) recordNameInput.focus();
+}
+
+recordsForm.addEventListener('submit', e => {
+  e.preventDefault();
+  if (entrySaved || !gameOver) return;
+  const rec = loadRecords();
+  if (!qualifies(rec)) { recordsForm.classList.add('hidden'); return; }
+  entrySaved = true;
+  highlightDate = Date.now();
+  const name = recordNameInput.value.trim().slice(0, NAME_MAX) || 'ANON';
+  rec.top.push({ name, score, lines, level, date: highlightDate });
+  rec.top.sort((a, b) => b.score - a.score);
+  rec.top = rec.top.slice(0, RECORDS_TOP);
+  saveRecords(rec);
+  recordsForm.classList.add('hidden');
+  renderRecords();
+  restartBtn.focus();
+});
+
+resetBtn.addEventListener('click', () => {
+  if (!resetArmed) { resetArmed = true; renderRecords(); return; }
+  resetArmed = false;
+  highlightDate = null;
+  try { localStorage.removeItem(RECORDS_KEY); } catch (e) { /* ignore */ }
+  if (gameOver) recordsForm.classList.toggle('hidden', !qualifies(loadRecords()) || entrySaved);
+  renderRecords();
+});
+
+// ==== Menu de pausa ====
+const MAX_START_LEVEL = 15;
+const pauseMenu = document.getElementById('pause-menu');
+const resumeBtn = document.getElementById('resume-btn');
+const pauseRestartBtn = document.getElementById('pause-restart-btn');
+const controlsBtn = document.getElementById('controls-btn');
+const controlsList = document.getElementById('pause-controls');
+const levelPicker = document.getElementById('level-picker');
+const levelValueEl = document.getElementById('start-level-value');
+const menuItems = [resumeBtn, pauseRestartBtn, controlsBtn, levelPicker];
+// teclas pulsadas mientras el menu estaba abierto (o que lo cerraron): ignoradas hasta soltarlas
+const heldBlocked = new Set();
+
+function setStartLevel(v) {
+  startLevel = Math.min(MAX_START_LEVEL, Math.max(1, v));
+  levelValueEl.textContent = startLevel;
+  levelPicker.setAttribute('aria-valuenow', startLevel);
+}
+
+function openPauseMenu() {
+  paused = true;
+  cancelAnimationFrame(animId);
+  controlsList.classList.add('hidden');
+  controlsBtn.setAttribute('aria-expanded', 'false');
+  pauseMenu.classList.remove('hidden');
+  resumeBtn.focus();
+}
+
+function closePauseMenu() {
+  paused = false;
+  pauseMenu.classList.add('hidden');
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  lastTime = performance.now();
+  dropAccum = 0;
+  loop(lastTime);
+}
+
+// Devuelve true si el evento fue consumido por el menu
+function handlePauseKeys(e) {
+  if (e.code === 'KeyP' || e.code === 'Escape') {
+    if (gameOver) return true;
+    e.preventDefault();
+    if (!e.repeat) {
+      togglePause();
+    }
+    return true;
+  }
+  if (!paused) return false;
+  heldBlocked.add(e.code);
+  const i = menuItems.indexOf(document.activeElement);
+  if (e.code === 'ArrowDown' || e.code === 'ArrowUp') {
+    e.preventDefault();
+    if (!e.repeat) {
+      const d = e.code === 'ArrowDown' ? 1 : -1;
+      const from = i < 0 ? (d > 0 ? -1 : 0) : i;
+      menuItems[(from + d + menuItems.length) % menuItems.length].focus();
+    }
+  } else if (document.activeElement === levelPicker &&
+             (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+    e.preventDefault();
+    if (!e.repeat) setStartLevel(startLevel + (e.code === 'ArrowRight' ? 1 : -1));
+  } else if (e.code === 'Space' || e.code === 'Enter') {
+    if (document.activeElement === levelPicker) e.preventDefault();
+  } else if (e.code === 'Tab') {
+    return true; // dejar el foco nativo
+  } else {
+    e.preventDefault();
+  }
+  return true;
+}
+
+document.addEventListener('keyup', e => heldBlocked.delete(e.code));
+window.addEventListener('blur', () => heldBlocked.clear());
+
+resumeBtn.addEventListener('click', closePauseMenu);
+pauseRestartBtn.addEventListener('click', init);
+controlsBtn.addEventListener('click', () => {
+  const hidden = controlsList.classList.toggle('hidden');
+  controlsBtn.setAttribute('aria-expanded', String(!hidden));
+});
+document.getElementById('level-dec').addEventListener('click', () => setStartLevel(startLevel - 1));
+document.getElementById('level-inc').addEventListener('click', () => setStartLevel(startLevel + 1));
+
+// Boot (must stay last: records and pause blocks above declare consts used by init)
 loadSkin();
 init();
+recordsShowStart();
