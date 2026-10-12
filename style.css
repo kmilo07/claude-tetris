@@ -163,3 +163,23 @@ kbd {
 #restart-btn:hover {
   background: #9bbdff;
 }
+
+/* ---- Skins ---- */
+#skin-select {
+  background: #22223a;
+  color: #e0e0e0;
+  border: 1px solid #3a3a5a;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 13px;
+  font-family: inherit;
+}
+body.skin-neon { background: #000; }
+body.skin-neon #board, body.skin-neon #next-canvas { border-color: #00fff2; box-shadow: 0 0 18px rgba(0, 255, 242, 0.5); }
+body.skin-pastel { background: #f3e9f7; color: #5a4a6a; }
+body.skin-pastel .game-title { color: #b08cd9; text-shadow: none; }
+body.skin-pastel #board, body.skin-pastel #next-canvas { border-color: #e0cfe8; box-shadow: 0 0 24px rgba(176, 140, 217, 0.25); }
+body.skin-pastel .controls li { color: #7a6a8a; }
+body.skin-pixel { background: #0b1118; }
+body.skin-pixel #board, body.skin-pixel #next-canvas { border: 3px solid #3d5a73; border-radius: 0; }
+body.skin-pastel #skin-select { background: #fff; color: #5a4a6a; border-color: #e0cfe8; }
